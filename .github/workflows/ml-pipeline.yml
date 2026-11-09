@@ -1,0 +1,56 @@
+# The pipeline of this project. GitHub runs it on a clean computer (a "runner")
+# every time a commit or a tag is pushed.
+#
+#   test  ->  train  ->  quality gate  ->  keep the model  ->  release (tags only)
+#
+# Any step that fails stops the pipeline: nothing after it runs.
+
+name: ml-pipeline
+
+on:
+  push:
+
+permissions:
+  contents: write   # needed only by the last step, to create the release
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code of this commit
+        uses: actions/checkout@v7
+
+      - name: Install Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install the libraries
+        run: pip install -r requirements.txt
+
+      - name: Test the data and the model
+        run: pytest -v
+
+      - name: Train the model
+        run: python train.py
+
+      - name: Check the quality gate
+        run: python check_quality.py
+
+      - name: Keep the model of this run
+        uses: actions/upload-artifact@v7
+        with:
+          name: model
+          path: |
+            model.joblib
+            metrics.json
+
+      - name: Publish a release (tags starting with v only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" model.joblib metrics.json
+          --title "House price model $GITHUB_REF_NAME"
+          --notes-file report.md
